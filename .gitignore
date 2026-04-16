@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+env/
+
+# SMPL / large model files
+models/
+models_smplx_v1_1/
+SMPL_python_v.1.1.0/
+
+# Outputs
+output/
+debug/
+*.json
+
+# Videos
+*.mp4
+*.avi
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

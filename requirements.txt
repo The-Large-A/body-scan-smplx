@@ -1,0 +1,10 @@
+opencv-python
+numpy
+mediapipe
+torch
+smplx
+scipy
+trimesh
+pyyaml
+pyglet
+scikit-image
