@@ -1,92 +1,119 @@
 import torch
 import smplx
 import numpy as np
-from config import SMPL_MODEL_PATH, USER_HEIGHT_CM
+from config import SMPL_MODEL_PATH
 
 device = torch.device("cpu")
 
-# MediaPipe → SMPL-X joint mapping
-MP_TO_SMPL = {
-    11: 16,  # left shoulder
-    12: 17,  # right shoulder
-    23: 1,   # left hip
-    24: 2,   # right hip
-    25: 4,   # left knee
-    26: 5,   # right knee
-    27: 7,   # left ankle
-    28: 8    # right ankle
-}
+# Torso body-height fractions (feet=0, head=1) sampled for the fit.
+# Kept below the outstretched T-pose arms (~0.80) so the arms/head do not
+# contaminate the torso width/depth targets.
+TORSO_FRACTIONS = [0.45, 0.50, 0.55, 0.60, 0.65, 0.70]
+
+
+def horizontal_extent_profile(mask, fractions):
+    """
+    From a boolean person-mask, measure the horizontal pixel extent at each
+    requested body-height fraction (feet=0, head=1), plus the person's pixel
+    height. Returns (widths_px: dict frac->pixels, pixel_height).
+    """
+    ys, xs = np.where(mask)
+    if len(ys) == 0:
+        return {}, 0
+
+    y_top, y_bot = ys.min(), ys.max()
+    pixel_height = y_bot - y_top
+    if pixel_height <= 0:
+        return {}, 0
+
+    band_px = max(1, int(0.01 * pixel_height))
+
+    widths = {}
+    for f in fractions:
+        row = y_bot - f * pixel_height
+        band = np.abs(ys - row) <= band_px
+        if band.any():
+            widths[f] = xs[band].max() - xs[band].min()
+
+    return widths, pixel_height
+
 
 class SMPLFitter:
 
-    def __init__(self):
+    def __init__(self, gender="neutral"):
 
         self.model = smplx.create(
             model_path=SMPL_MODEL_PATH,
             model_type="smplx",
-            gender="neutral",
+            gender=gender,
             num_betas=10,
             batch_size=1
         ).to(device)
 
+    def fit(self, front_mask, side_mask, height_cm):
+        """
+        Fit SMPL-X shape (betas) + a global scale so the canonical mesh
+        reproduces the torso width (front view) and depth (side view)
+        profiles and the known standing height.
+        """
+        height_m = height_cm / 100.0
 
-    def fit(self, joints_list, masks):
+        # Silhouette -> real-world torso targets (metres).
+        front_px, front_h = horizontal_extent_profile(front_mask, TORSO_FRACTIONS)
+        side_px, side_h = horizontal_extent_profile(side_mask, TORSO_FRACTIONS)
 
-        joint_tensors = [
-            torch.tensor(j, dtype=torch.float32, device=device)
-            for j in joints_list
-        ]
+        width_target = {f: (w * height_m / front_h) for f, w in front_px.items()}
+        depth_target = {f: (d * height_m / side_h) for f, d in side_px.items()}
 
-        betas = torch.zeros((1,10), requires_grad=True, device=device)
+        betas = torch.zeros((1, 10), requires_grad=True, device=device)
+        scale = torch.ones(1, requires_grad=True, device=device)
 
-        # lock body pose
-        body_pose = torch.zeros((1,63), requires_grad=False, device=device)
+        body_pose = torch.zeros((1, 63), device=device)
+        global_orient = torch.zeros((1, 3), device=device)
 
-        global_orient = torch.zeros((1,3), requires_grad=False, device=device)
-        transl = torch.zeros((1,3), requires_grad=True, device=device)
-        optimizer = torch.optim.Adam(
-            [betas, transl],
-            lr=0.01
-        )
+        optimizer = torch.optim.Adam([betas, scale], lr=0.02)
 
-        for _ in range(150):
+        for _ in range(500):
 
             optimizer.zero_grad()
 
             output = self.model(
                 betas=betas,
                 body_pose=body_pose,
-                global_orient=global_orient,
-                transl=transl
+                global_orient=global_orient
             )
 
-            joints_3d = output.joints[0]
+            v = output.vertices[0]
+            v = (v - v.mean(dim=0)) * scale
 
-            loss = torch.tensor(0.0, device=device)
+            y = v[:, 1]
+            y_min = y.min()
+            mesh_h = y.max() - y_min
 
-            for target in joint_tensors:
+            loss = 10.0 * (mesh_h - height_m) ** 2
 
-                for mp_idx, smpl_idx in MP_TO_SMPL.items():
-                
-                    mp_joint = target[mp_idx]
-                    smpl_joint = joints_3d[smpl_idx]
+            for f in TORSO_FRACTIONS:
 
-                    loss += torch.mean((smpl_joint - mp_joint)**2)
+                y_f = y_min + f * mesh_h
+                band = torch.abs(y - y_f) < 0.02 * mesh_h
 
-            verts = output.vertices[0]
+                if band.sum() < 10:
+                    continue
 
-            min_x = torch.min(verts[:,0])
-            max_x = torch.max(verts[:,0])
-            min_z = torch.min(verts[:,2])
-            max_z = torch.max(verts[:,2])
+                vb = v[band]
 
-            width = max_x - min_x
-            depth = max_z - min_z
+                if f in width_target:
+                    w = vb[:, 0].max() - vb[:, 0].min()
+                    loss = loss + (w - width_target[f]) ** 2
 
-            loss += 0.1 * (width + depth)
+                if f in depth_target:
+                    d = vb[:, 2].max() - vb[:, 2].min()
+                    loss = loss + (d - depth_target[f]) ** 2
+
+            # keep shape plausible
+            loss = loss + 1e-4 * (betas ** 2).sum()
 
             loss.backward()
-
             optimizer.step()
 
         with torch.no_grad():
@@ -94,27 +121,10 @@ class SMPLFitter:
             output = self.model(
                 betas=betas,
                 body_pose=body_pose,
-                global_orient=global_orient,
-                transl=transl
+                global_orient=global_orient
             )
 
-        vertices = output.vertices[0].cpu().numpy()
+            v = output.vertices[0]
+            v = (v - v.mean(dim=0)) * scale
 
-        vertices = self.scale_to_height(vertices)
-
-        return vertices
-
-
-    def scale_to_height(self, vertices):
-
-        y = vertices[:,1]
-
-        mesh_height = y.max() - y.min()
-
-        target_height_m = USER_HEIGHT_CM / 100
-
-        scale = target_height_m / mesh_height
-
-        vertices = vertices * scale
-
-        return vertices
+        return v.cpu().numpy()

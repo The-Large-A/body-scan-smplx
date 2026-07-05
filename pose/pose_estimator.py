@@ -3,7 +3,6 @@ import numpy as np
 import cv2
 
 mp_pose = mp.solutions.pose
-mp_selfie = mp.solutions.selfie_segmentation
 
 class PoseEstimator:
 
@@ -11,11 +10,9 @@ class PoseEstimator:
 
         self.pose = mp_pose.Pose(
             static_image_mode=False,
-            model_complexity=1,
-            enable_segmentation=False
+            model_complexity=2,
+            enable_segmentation=True
         )
-
-        self.segment = mp_selfie.SelfieSegmentation(model_selection=1)
 
     def detect(self, frame):
 
@@ -23,12 +20,10 @@ class PoseEstimator:
 
         pose_results = self.pose.process(image)
 
-        seg_results = self.segment.process(image)
-
-        mask = seg_results.segmentation_mask > 0.5
-
         if not pose_results.pose_landmarks:
-            return None, mask
+            return None, None
+
+        mask = pose_results.segmentation_mask > 0.5
 
         joints = []
 

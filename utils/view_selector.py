@@ -1,12 +1,15 @@
 import numpy as np
 
+
 def select_views(joints_list):
+    """
+    Pick the frame indices with the widest and narrowest shoulder spread.
+    Widest shoulders => front-facing view; narrowest => side view.
+    Shoulder landmarks are MediaPipe indices 11 (left) and 12 (right).
+    """
+    widths = [abs(j[11][0] - j[12][0]) for j in joints_list]
 
-    # assume video rotation
-    n = len(joints_list)
+    front_idx = int(np.argmax(widths))
+    side_idx = int(np.argmin(widths))
 
-    front = joints_list[0]
-    side = joints_list[n//2]
-    back = joints_list[-1]
-
-    return [front, side, back]
+    return front_idx, side_idx

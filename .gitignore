@@ -1,24 +1,40 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
 
-# Virtual env
+# Virtual environments
 venv/
+.venv/
 env/
+ENV/
 
-# SMPL / large model files
+# SMPL / SMPL-X model files (large, licensed — not distributed)
 models/
 models_smplx_v1_1/
 SMPL_python_v.1.1.0/
 
-# Outputs
+# Generated outputs
 output/
 debug/
 *.json
 
-# Videos
+# Videos — may contain personal footage; keep private
+videos/
 *.mp4
 *.avi
+*.mov
+*.mkv
+*.webm
+
+# Temp / scratch
+scratchpad/
+*.tmp
+*.log
 
 # OS
 .DS_Store
@@ -27,3 +43,13 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Claude Code / AI assistant artifacts
+.claude/
+.claude.json
+.mcp.json
+CLAUDE.md
+
+# Private validation data (real personal measurements)
+validation_data.py
+

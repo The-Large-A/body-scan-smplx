@@ -1,168 +1,157 @@
-# Body Scan – Video-Based Body Measurement Estimation
+# Body Scan – Video-Based Body Measurement & Composition
 
 ## Overview
 
-This project estimates human body measurements from a short video using computer vision and 3D body modeling.
+Body Scan estimates human body measurements and basic body composition from a
+short rotating video. It fits a 3D SMPL-X body model to the person, measures
+the torso directly from the rotation silhouettes, measures the limbs from the
+fitted mesh, and reports circumferences plus BMI and body-fat estimates.
 
-It reconstructs a 3D human mesh using the SMPL-X model and computes body circumferences from cross-sectional slices of the mesh.
-
-The system is designed as a foundation for applications in fitness tracking, health analytics, and digital body modeling.
-
----
-
-## Features
-
-- Video-based body measurement pipeline
-- Pose estimation using MediaPipe (33 landmarks)
-- Multi-frame pose averaging for stability
-- SMPL-X 3D body reconstruction
-- Height normalization for real-world scaling
-- Measurement extraction using cross-sectional slicing
-- Circumference estimation via ellipse fitting
-- Debug visualization of mesh and measurement slices
+It is a **wellness / progress-tracking** tool, not a medical device.
 
 ---
 
-## Measurements Supported
+## Measurements
 
-- Chest
-- Waist
-- Hip
-- Thigh
-- Calf
-- Upper Arm
-- Wrist
+**Circumferences:** neck, chest, waist, hip, bicep, forearm, wrist, thigh, calf
+
+**Body composition:** BMI, weight (entered or estimated from mesh volume),
+body-fat % (US-Navy tape method, plus a weight-based Deurenberg cross-check
+when weight and age are provided)
 
 ---
 
-## Project Structure
+## How it works
 
-```id="7p2i5k"
-Body Scan/
-│
-├── pose/           # Pose estimation
-├── smpl/           # SMPL-X fitting
-├── measurement/    # Measurement logic
-├── utils/          # Utilities
-├── debug/          # Visualization tools
-├── models/         # SMPL-X models (not included)
-├── output/         # Generated results
-│
-├── main.py         # Entry point
-├── config.py       # Configuration
-├── requirements.txt
+1. Extract frames from the rotating video.
+2. Detect pose landmarks and a body silhouette per frame (MediaPipe Pose).
+3. **Torso (chest / waist / hip):** measured directly from the silhouettes.
+   Across the full spin, the widest on-screen body width is the true frontal
+   width and the narrowest is the true side depth; an ellipse through the two
+   gives the circumference. This avoids trusting any single "front"/"side"
+   frame.
+4. Fit SMPL-X shape to the silhouette + known height (gendered model).
+5. **Limbs (bicep / forearm / wrist / thigh / calf / neck):** isolate each part
+   with a vertex segmentation map, find its long axis (PCA), slice
+   perpendicular, and measure the perimeter.
+6. Optionally apply a one-time per-user calibration (see below).
+7. Compute BMI and body-fat.
+
+---
+
+## Calibration (recommended)
+
+Raw silhouette measurements are **shape-correct and repeatable** but run
+uniformly ~15% high (mask thickness + camera perspective). A single reference
+measurement removes this bias for a person; it is entered **once per person**,
+not per video, and every later scan of that person stays accurate.
+
+Two ways to provide it:
+
+- **Clothing size (easy):** pick a known size from a chart (e.g. women's jeans
+  → hip). The size's midpoint circumference is used as the anchor. Approximate
+  (vanity sizing varies) but far better than no calibration.
+- **Tape measurement (most accurate):** set `CALIBRATION_PART` and
+  `CALIBRATION_CM` in `config.py` to one real measured circumference.
+
+Without calibration, absolute values are ~15% high but **trends between scans
+are still reliable**.
+
+---
+
+## Project structure
+
 ```
-
----
-
-## Installation
-
-Install dependencies:
-
-```bash id="qlw6au"
-pip install -r requirements.txt
+Body Scan/
+├── pose/            # MediaPipe pose + segmentation
+├── smpl/            # SMPL-X shape fitting
+├── measurement/     # torso, limb, and body-composition logic
+├── utils/           # video / json / view-selection helpers
+├── debug/           # 3D visualization tools
+├── models/          # SMPL-X models + vertex segmentation (not distributed)
+├── output/          # generated JSON results
+│
+├── pipeline.py      # shared scan pipeline (video -> measurements)
+├── main.py          # CLI entry point (+ 3D viewer)
+├── ui.py            # plain Tkinter GUI
+├── validate.py      # accuracy check against known tape measurements
+├── sizing.py        # clothing size charts for calibration
+├── config.py        # configuration
+└── requirements.txt
 ```
 
 ---
 
 ## Setup
 
-### 1. Download SMPL-X Model
-
-Download SMPL-X from the official source and place it in:
-
-```id="kq9q4m"
-models/smplx/
-```
-
-Note: The model is not included due to licensing restrictions.
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Place SMPL-X models in `models/smplx/` (`SMPLX_MALE.npz`,
+   `SMPLX_FEMALE.npz`, `SMPLX_NEUTRAL.npz`). Not distributed — obtain from the
+   official SMPL-X source under its licence.
+3. Place the SMPL-X vertex segmentation map at
+   `models/smplx_vert_segmentation.json` (Meshcapade SMPL-X body segmentation).
 
 ---
 
-### 2. Prepare Input Video
+## Recording guidance
 
-Requirements:
-
-- Full body visible
-- Upright posture
-- Slow rotation (preferably 360°)
-- Minimal occlusion
+- Full body in frame the whole time; camera still (tripod), person rotates.
+- One smooth, steady 360° turn (~10 s).
+- **T-pose** (arms out) so limbs separate from the torso; tight clothing.
+- Film from ~3 m back to reduce perspective distortion.
 
 ---
 
 ## Usage
 
-Run the program:
+**GUI (recommended):**
+```bash
+python ui.py
+```
+Pick a video, enter height (weight/age/gender optional), optionally pick a
+clothing size to calibrate, press **Scan**. The Settings tab switches to
+imperial units.
 
-```bash id="zrm3qf"
-python main.py your_video.mp4
+**CLI:**
+```bash
+python main.py videos/your_video.mp4
+```
+Set height, gender, and optional weight/age/calibration in `config.py` first.
+Results are written to `output/body_measurements.json`.
+
+**Validate accuracy** (against known tape measurements):
+```bash
+python validate.py
 ```
 
 ---
 
-## Output
+## Accuracy
 
-Results are saved as:
+Validated against a subject with known tape measurements:
 
-```id="j0g9yo"
-output/body_measurements.json
-```
+- **Calibrated:** mean absolute error ~2 cm across all circumferences;
+  weight-from-volume within ~3 kg.
+- **Uncalibrated:** ~15% high but consistent (good for trend tracking).
 
-Example:
-
-```json id="81w3a3"
-{
-  "chest": 98.2,
-  "waist": 82.4,
-  "hip": 101.1
-}
-```
-
----
-
-## How It Works
-
-1. Extract frames from input video
-2. Detect body landmarks using MediaPipe
-3. Average joints across frames
-4. Fit SMPL-X body model
-5. Scale mesh to real-world height
-6. Extract cross-sectional slices
-7. Fit ellipse to estimate circumference
+Body-fat estimates carry inherent method spread (Navy vs. weight-based can
+differ several %) and should be treated as approximate.
 
 ---
 
 ## Limitations
 
-- Accuracy depends on video quality and lighting
-- Loose clothing can distort measurements
-- Ellipse fitting may be inaccurate for irregular shapes
-- Single-pose approximation limits precision
-
-Typical error range: ±4–7 cm
-
----
-
-## Future Improvements
-
-- Convex hull-based circumference estimation
-- Multi-frame mesh fusion
-- Improved anatomical landmark detection
-- Machine learning-based body measurement prediction
-- Body fat estimation models
-
----
-
-## Applications
-
-- Fitness tracking
-- Digital body measurement
-- Online clothing sizing
-- Health analytics
-- Anthropometric studies
+- Absolute accuracy depends on calibration; without it, values are biased high.
+- Chest is the hardest measurement in a strict T-pose (arms occlude it).
+- Loose clothing, cluttered backgrounds, and heavy perspective reduce accuracy.
+- Single-camera reconstruction; not a medical measurement.
 
 ---
 
 ## License
 
-This project depends on SMPL-X. Ensure compliance with its license when using model files.
+Depends on SMPL-X — ensure compliance with its licence when using model files.
+```
