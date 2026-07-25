@@ -23,7 +23,12 @@ class PoseEstimator:
         if not pose_results.pose_landmarks:
             return None, None
 
-        mask = pose_results.segmentation_mask > 0.5
+        mask = (pose_results.segmentation_mask > 0.5).astype(np.uint8)
+        # Open+close removes single-pixel silhouette spikes/holes that would
+        # otherwise inflate the p90 width used for torso extents.
+        kernel = np.ones((5, 5), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel).astype(bool)
 
         joints = []
 

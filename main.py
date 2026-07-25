@@ -4,8 +4,6 @@ from pipeline import run_pipeline
 from utils.json_utils import save_measurements
 from config import OUTPUT_FILE
 
-from debug.visualize_measurements import visualize_measurements
-
 
 def main(video_path):
 
@@ -13,9 +11,14 @@ def main(video_path):
 
     vertices, faces, measurements = run_pipeline(video_path)
 
-    print("Opening 3D body viewer with measurement rings...")
-
-    visualize_measurements(vertices, faces)
+    # Optional 3D preview. Lives in debug/ (dev-only, not distributed), so
+    # skip it gracefully when that folder isn't present.
+    try:
+        from debug.visualize_measurements import visualize_measurements
+        print("Opening 3D body viewer with measurement rings...")
+        visualize_measurements(vertices, faces)
+    except ImportError:
+        print("3D viewer unavailable (debug/ not present); skipping preview.")
 
     measurements = {k: float(v) for k, v in measurements.items()}
 

@@ -20,6 +20,20 @@ LIMB_PARTS = [
     ("calf",    "Leg",     "max"),
 ]
 
+# Bracketing SMPL-X body-joint indices per (side, segment). Their difference is
+# the limb's anatomical bone axis, used to slice perpendicular to the bone
+# (avoids the oblique-cut inflation PCA suffers on limbs with muscle bulk).
+JOINT_AXIS = {
+    ("left",  "Arm"):     (16, 18),   # shoulder -> elbow
+    ("right", "Arm"):     (17, 19),
+    ("left",  "ForeArm"): (18, 20),   # elbow -> wrist
+    ("right", "ForeArm"): (19, 21),
+    ("left",  "UpLeg"):   (1, 4),     # hip -> knee
+    ("right", "UpLeg"):   (2, 5),
+    ("left",  "Leg"):     (4, 7),     # knee -> ankle
+    ("right", "Leg"):     (5, 8),
+}
+
 # Every circumference output shares the systematic silhouette bias, so the
 # per-user calibration factor applies to all of them.
 CALIBRATED_PARTS = TORSO_PARTS + [name for name, _, _ in LIMB_PARTS] + ["neck"]
@@ -60,17 +74,31 @@ def _segmentation():
     return _SEGMENTATION
 
 
-def limb_circumferences(vertices, part):
+def _perp_basis(axis):
+    """Two orthonormal vectors spanning the plane perpendicular to axis."""
+    ref = np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    e1 = np.cross(axis, ref)
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(axis, e1)
+    return e1, e2
+
+
+def limb_circumferences(vertices, part, axis=None):
     """
-    Circumference (cm) sampled along one limb. The limb's own long axis is
-    found by PCA, then the mesh is sliced perpendicular to it and each slice's
-    perimeter is measured in the perpendicular plane.
+    Circumference (cm) sampled along one limb. The mesh is sliced perpendicular
+    to the limb's long axis and each slice's perimeter is measured in that
+    plane. The axis is the anatomical bone axis (bracketing SMPL-X joints) when
+    given, else PCA of the segment as a fallback.
     """
     pts = vertices[_segmentation()[part]]
     center = pts.mean(axis=0)
 
-    _, _, vt = np.linalg.svd(pts - center)
-    axis, e1, e2 = vt[0], vt[1], vt[2]
+    if axis is None:
+        _, _, vt = np.linalg.svd(pts - center)
+        axis, e1, e2 = vt[0], vt[1], vt[2]
+    else:
+        axis = axis / np.linalg.norm(axis)
+        e1, e2 = _perp_basis(axis)
 
     proj = (pts - center) @ axis
     lo, hi = proj.min(), proj.max()
@@ -88,11 +116,13 @@ def limb_circumferences(vertices, part):
     return np.array(circs)
 
 
-def limb_measurement(vertices, seg_part, mode):
+def limb_measurement(vertices, seg_part, mode, joints):
     """Average the left/right thickest ("max") or thinnest ("min") slice."""
     values = []
     for side in ("left", "right"):
-        circs = limb_circumferences(vertices, side + seg_part)
+        ja, jb = JOINT_AXIS[(side, seg_part)]
+        axis = joints[jb] - joints[ja]
+        circs = limb_circumferences(vertices, side + seg_part, axis)
         circs = circs[circs > 0]
         if len(circs):
             values.append(circs.max() if mode == "max" else circs.min())
@@ -153,7 +183,7 @@ def torso_circumference(masks, ratio, height_cm):
 # --------------------------------------------------
 # MAIN FUNCTION
 # --------------------------------------------------
-def compute_measurements(vertices, masks, faces):
+def compute_measurements(vertices, masks, faces, joints):
 
     height_cm = config.USER_HEIGHT_CM
     gender = config.GENDER
@@ -164,9 +194,10 @@ def compute_measurements(vertices, masks, faces):
     for part in TORSO_PARTS:
         results[part] = torso_circumference(masks, HEIGHT_RATIOS[part], height_cm)
 
-    # limbs (arms + legs): from the mesh via vertex segmentation
+    # limbs (arms + legs): from the mesh via vertex segmentation, sliced along
+    # the anatomical bone axis
     for name, seg_part, mode in LIMB_PARTS:
-        results[name] = limb_measurement(vertices, seg_part, mode)
+        results[name] = limb_measurement(vertices, seg_part, mode, joints)
 
     # neck (single, non-lateral segment; median slice = typical neck girth)
     neck = limb_circumferences(vertices, "neck")

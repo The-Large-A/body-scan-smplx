@@ -32,7 +32,8 @@ when weight and age are provided)
    frame.
 4. Fit SMPL-X shape to the silhouette + known height (gendered model).
 5. **Limbs (bicep / forearm / wrist / thigh / calf / neck):** isolate each part
-   with a vertex segmentation map, find its long axis (PCA), slice
+   with a vertex segmentation map, find its long axis (the anatomical bone axis
+   from the bracketing SMPL-X joints; PCA fallback for the neck), slice
    perpendicular, and measure the perimeter.
 6. Optionally apply a one-time per-user calibration (see below).
 7. Compute BMI and body-fat.

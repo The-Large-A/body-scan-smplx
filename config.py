@@ -18,9 +18,7 @@ CALIBRATION_CM = None      # e.g. 90
 HEIGHT_RATIOS = {
     "chest": 0.68,
     "waist": 0.58,
-    "hip": 0.50,
-    "thigh": 0.32,
-    "calf": 0.20
+    "hip": 0.50
 }
 
 SMPL_MODEL_PATH = "models"

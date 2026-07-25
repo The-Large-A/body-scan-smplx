@@ -124,7 +124,11 @@ class SMPLFitter:
                 global_orient=global_orient
             )
 
-            v = output.vertices[0]
-            v = (v - v.mean(dim=0)) * scale
+            verts = output.vertices[0]
+            center = verts.mean(dim=0)
+            v = (verts - center) * scale
+            # Joints follow the same centre+scale transform as the vertices, so
+            # they can define anatomical bone axes for limb slicing.
+            self.joints = ((output.joints[0] - center) * scale).cpu().numpy()
 
         return v.cpu().numpy()

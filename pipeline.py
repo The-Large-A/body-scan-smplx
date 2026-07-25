@@ -33,6 +33,6 @@ def run_pipeline(video_path):
     fitter = SMPLFitter(gender=config.GENDER)
     vertices = fitter.fit(masks[front_idx], masks[side_idx], config.USER_HEIGHT_CM)
 
-    measurements = compute_measurements(vertices, masks, fitter.model.faces)
+    measurements = compute_measurements(vertices, masks, fitter.model.faces, fitter.joints)
 
     return vertices, fitter.model.faces, measurements
